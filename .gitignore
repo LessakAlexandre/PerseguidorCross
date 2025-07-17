@@ -30,3 +30,5 @@
 *.exe
 *.out
 *.app
+# Ignorar arquivos do PlatformIO
+.pio/
