@@ -159,11 +159,15 @@
     class sensor_lateral{
     private:
         const int SENSOR_PIN;
+        int count;
 
     public:
         sensor_lateral(int sensor_pin):SENSOR_PIN(sensor_pin){}
-        int leitura(){
-        return digitalRead(SENSOR_PIN);
+        int count_lap(){
+            if(digitalRead(SENSOR_PIN)==HIGH){
+                count++;
+            }
+            return count++;
         }
     };
     class encoder{
@@ -397,7 +401,7 @@ void taskRecordCoordinates(void *pvParameters)
   (void) pvParameters;
   // Aguarda 2 segundos para que os sensores estejam estabilizados
   vTaskDelay(pdMS_TO_TICKS(2000));
-  File readFile = SPIFFS.open("/data.txt", FILE_READ);
+  File readFile = SPIFFS.open("../data/coordenadas.txt", FILE_READ);
   if (!readFile) {
     Serial.println("Erro ao abrir data.txt para leitura!");
     vTaskDelete(NULL);
