@@ -383,6 +383,59 @@ void taskComputeOdom(void *pvParameters)
     vTaskDelay(pdMS_TO_TICKS(3));
   }
 }
+void taskRecordCoordinates(void *pvParameters)
+{
+  (void) pvParameters;
+  // Aguarda 2 segundos para que os sensores estejam estabilizados
+  vTaskDelay(pdMS_TO_TICKS(2000));
+  File readFile = SPIFFS.open("/data.txt", FILE_READ);
+  if (!readFile) {
+    Serial.println("Erro ao abrir data.txt para leitura!");
+    vTaskDelete(NULL);
+  }
+  Serial.println("Conteúdo de data.txt:");
+  while (readFile.available()) {
+    vTaskDelay(pdMS_TO_TICKS(1));
+    Serial.write(readFile.read());
+  }
+  readFile.close();
+
+  // Abre ou cria o arquivo data.txt para escrita
+  File file = SPIFFS.open("/data.txt", FILE_WRITE);
+  if (!file) {
+    Serial.println("Erro ao abrir data.txt para escrita!");
+    vTaskDelete(NULL);
+  }
+  pixels.setPixelColor(0, pixels.Color(255, 100, 0));
+  pixels2.setPixelColor(0, pixels2.Color(255, 100, 0));
+  pixels.show();
+  pixels2.show();
+  robotEnabled = true;
+  uint32_t startTime = millis();
+  // Registra as coordenadas a cada 0,5 s por 10 segundos (20 amostras)
+  for (;;) {
+    if (!robotEnabled) {
+      pixels.setPixelColor(0, pixels.Color(0, 0, 0));
+      pixels2.setPixelColor(0, pixels2.Color(0, 0, 0));
+      pixels.show();
+      pixels2.show();
+      file.close();
+      vTaskDelete(NULL);
+    }
+    float x, y, v;
+    xSemaphoreTake(xMutex, portMAX_DELAY);
+    x = g_x;
+    y = g_y;
+    v = velo;
+    xSemaphoreGive(xMutex);
+
+    float t = (millis() - startTime) / 1000.0f; // tempo em segundos
+    // Formata a linha no formato "x,y,t"
+    String line = String(x, 2) + "," + String(y, 2) + "," + String(t, 2) + "," + String(v, 2) + "\n";
+    file.print(line);
+    vTaskDelay(pdMS_TO_TICKS(15)); // aguarda 0,5 s
+  }
+}
 
 
 void SensorTask(void*pvParameters){
