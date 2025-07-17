@@ -22,6 +22,7 @@
         #define PWM_RESOLUTION        10
         const float posicaoDesejada = 550;
         int baseSpeedIncrement =      300;      // Resolução: 10 bits (0-1023)
+        int baseSpeed =              140;
     //SENSORES
         #define NUM_SENSORES          12
         const int VALOR_ESCALA =      1000;
@@ -86,13 +87,14 @@
     private:
         const int PWM_PIN;
         const int DIR_PIN;
-        int baseSpeed = 140;
+        int baseSpeed;
 
     public:
         //---------------------construtor-------------------------//
-        MOTOR(int PWM_pin,int DIR_pin)
-        :PWM_PIN(PWM_pin), DIR_PIN(DIR_pin){ 
-        pinMode(DIR_PIN, OUTPUT);
+        MOTOR(int PWM_pin,int DIR_pin,int BASE_SPEED):PWM_PIN(PWM_pin), DIR_PIN(DIR_pin){ 
+            pinMode(DIR_PIN, OUTPUT);
+            baseSpeed = BASE_SPEED;
+        
         }
         //----------------------Funções---------------------------//
         //pinMode(FAULT_PIN, INPUT_PULLUP); -> INPUT_PULLUP valor HIGH por padrão
@@ -235,9 +237,9 @@
 };
 //---------------------------OBJETOS------------------------------------//
     //MOTORES
-        MOTOR esquerdo(13,12);
-        MOTOR direito(48,47);
-    //SENSORES
+        MOTOR esquerdo(13,12,baseSpeed);
+        MOTOR direito(48,47,baseSpeed);
+    //SENSORES 
         sensor Frontais(550);
     //sensor Lateral(/*PINO*/);
     //ENCONDER
@@ -447,16 +449,17 @@ void taskRecordCoordinates(void *pvParameters)
 void SensorTask(void*pvParameters){
     (void)pvParameters;
     while (true){
-        posicao = Frontais.leitura()//aqui poderia não usar essa task e colocar direto?
+        posicao = Frontais.leitura();//aqui poderia não usar essa task e colocar direto?
     }
 }
 void ControlTask(void *pvParameters) {
     (void) pvParameters;
+    unsigned long lastTime = millis();
     while (true) {
         unsigned long now = millis();
         float dt = (now - lastTime) / 1000.0;
         if(dt>=0){
-            float correcao=PID.corretcion(posicao,dt)
+            float correcao=PID.corretcion(posicao,dt);
             
             int leftSpeed  = baseSpeed - (int)correcao;
             int rightSpeed = -(baseSpeed + (int)correcao);
