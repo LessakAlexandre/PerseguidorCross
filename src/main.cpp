@@ -36,10 +36,11 @@
         volatile float g_totalDisp1 = 0.0f; // cm
         volatile float g_totalDisp2 = 0.0f; // cm
 
-        // Giroscópio (Z) em graus/s (dps)
+    // Giroscópio (Z) em graus/s (dps)
         volatile float g_gyroZ_dps = 0.0f;
+        float gyroOffset = 0;
 
-        // Pose do robô
+    // Pose do robô
         volatile float g_x     = 0.0f; // posição em X (cm)
         volatile float g_y     = 0.0f; // posição em Y (cm)
         volatile float g_theta = 0.0f; // orientação (rad)
@@ -179,9 +180,9 @@
         int32_t gyroRaw[3];
         const int numSamples = 1000;  
         float sumGyro = 0;
-        float gyroOffset = 0;
+        float Offset;
     public:
-        void calibrateSensor() {
+        float calibrateSensor() {
             int32_t gyroData[3];
             Serial.println("Calibrando o sensor... Mantenha-o imóvel.");
             delay(2000);
@@ -190,12 +191,13 @@
                 sumGyro += gyroData[2];
                 delay(5);
             }
-            gyroOffset = sumGyro / numSamples;
+            Offset = sumGyro / numSamples;
             
             Serial.print("Giroscópio Offsets: ");
             Serial.println(gyroOffset);
-            }
-            float leitura(){
+            return Offset;
+        }
+        float leitura(){
             AccGyr.Get_G_Axes(gyroRaw);
             return gyroRaw[2];
         }
@@ -236,7 +238,7 @@
         encoder ENCODER_11(1);
         encoder ENCODER_39(8);
     //GIROSCOPIO
-        giroscopio GIROSCOPIO; //Ta certo assim?
+        giroscopio GYRO; //Ta certo assim?
         pid PID(0.475 , 0.0 , 0.075 , 550);
 //------------------------------TASKS-----------------------------------//
 void taskReadSensors(void *pvParameters){
@@ -273,6 +275,112 @@ void taskReadSensors(void *pvParameters){
 
     // Espera 5 ms (aprox.) até a próxima leitura
     vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+void taskComputeOdom(void *pvParameters)
+{
+  (void) pvParameters;
+  static uint32_t lastTime = micros();
+  const float straight = 30;
+  const float adjust_x = 100;
+  const float adjust_y = -0;
+  const float gain = 0.15;
+  const float max_vel = 400;
+  const float min_vel = 150;
+  float facter = straight / adjust_x;
+  float lastDisp = 0;
+  float lastTheta = 0;
+
+  for (;;)
+  {
+    uint32_t currentTime = micros();
+    float dt = (currentTime - lastTime) / 1e6; // Converte micros para segundos
+    lastTime = currentTime;
+
+    // Captura as leituras compartilhadas
+    xSemaphoreTake(xMutex, portMAX_DELAY);
+    float angle1       = g_angle1;
+    float angle2       = g_angle2;
+    float lastAngle1   = g_lastAngle1;
+    float lastAngle2   = g_lastAngle2;
+    float gyroZ_dps    = g_gyroZ_dps;
+    xSemaphoreGive(xMutex);
+
+    // Calcula as diferenças dos ângulos dos encoders
+    float deltaAngle1 = angle1 - lastAngle1;
+    float deltaAngle2 = angle2 - lastAngle2;
+
+    // Corrige wrap-around
+    if (deltaAngle1 > 180.0f)  deltaAngle1 -= 360.0f;
+    if (deltaAngle1 < -180.0f) deltaAngle1 += 360.0f;
+    if (deltaAngle2 > 180.0f)  deltaAngle2 -= 360.0f;
+    if (deltaAngle2 < -180.0f) deltaAngle2 += 360.0f;
+
+    // Converte a variação dos ângulos dos encoders em rotação das rodas (em rotações)
+    float wheelRotation1 = (deltaAngle1 * GEAR_RATIO) / 360.0f;
+    float wheelRotation2 = (deltaAngle2 * GEAR_RATIO) / 360.0f;
+
+    // Calcula o deslocamento linear (em cm) de cada roda
+    float displacement1_cm = -(wheelRotation1 * WHEEL_CIRCUMF_CM);
+    float displacement2_cm = wheelRotation2 * WHEEL_CIRCUMF_CM;
+    g_totalDisp1 += displacement1_cm;
+    g_totalDisp2 += displacement2_cm;
+
+    float totalDisp = (g_totalDisp1 + g_totalDisp2) * 0.5f;
+
+    // Estima a variação de ângulo a partir dos encoders (modelo diferencial)
+    // Converte WHEEL_BASE para centímetros: WHEEL_BASE * 100
+    float deltaThetaEncoder = (displacement2_cm - displacement1_cm) / (WHEEL_BASE * 100.0f);
+
+    // Estima a velocidade angular dos encoders (rad/s)
+    float encoderOmega = -deltaThetaEncoder / dt;
+
+    // Converte a taxa angular do giroscópio de dps para rad/s
+    float gyroOmega = (gyroZ_dps - gyroOffset) * (3.14159265359f / 180.0f) / 997.856;
+
+    // Aplica o filtro complementar nas velocidades angulares
+
+    const float alpha = 1; // pondera maiormente o giroscópio
+    float filteredOmega = alpha * gyroOmega + (1.0f - alpha) * (encoderOmega);
+
+    // Integra a velocidade angular filtrada para atualizar o ângulo
+    xSemaphoreTake(xMutex, portMAX_DELAY);
+    g_theta += filteredOmega * dt; // integrando velocidade angular para encontrar theta
+    float thetaRounded = roundf(g_theta * 100.0f) / 100.0f;
+    // Atualiza os ângulos anteriores dos encoders para a próxima iteração
+    g_lastAngle1 = angle1;
+    g_lastAngle2 = angle2;
+    xSemaphoreGive(xMutex);
+
+    // Atualiza também a posição (odometria linear) usando a média dos deslocamentos
+    float v_cm_s = (displacement1_cm + displacement2_cm) * 0.5f;
+    xSemaphoreTake(xMutex, portMAX_DELAY);
+    g_x += v_cm_s * cosf(thetaRounded);
+    g_y += v_cm_s * sinf(thetaRounded);
+    if (abs(totalDisp) - lastDisp >= 5) {
+      radius = abs(((abs(totalDisp) - lastDisp) / (g_theta - lastTheta)));
+      radiusArray.push_back(radius);
+
+      velo = (1 / (1 + exp(-(gain / facter) * radius + (adjust_x / 2) * gain))) * (max_vel - min_vel) + min_vel + adjust_y ;
+      //velo = 1e-3 * radius * radius * ((max_vel - min_vel) / 100) + min_vel;
+      lastDisp = abs(totalDisp);
+      lastTheta = g_theta;
+
+    }
+    if (totalDisp > 85 * 6) { // duas voltas {
+      robotEnabled = false;
+      vTaskDelete(NULL);
+    }
+    xSemaphoreGive(xMutex);
+
+    //Serial.print("Velocidade Angular Filtrada (rad/s): ");
+    //Serial.print(g_x, 4);
+    //Serial.print(" | ");
+    //Serial.print(g_totalDisp1, 4);
+    //Serial.print(" | ");
+    //Serial.println(thetaRounded * 57.2958, 4);
+
+    vTaskDelay(pdMS_TO_TICKS(3));
   }
 }
 
@@ -317,7 +425,7 @@ void setup(){
     AccGyr.Enable_X();
     AccGyr.Enable_G();
     //
-    GIROSCOPIO.calibrateSensor();
+    float gyroOffset = GYRO.calibrateSensor();
     
     if (!SPIFFS.begin(true)) {
         Serial.println("Erro ao montar SPIFFS");
