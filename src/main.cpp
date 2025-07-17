@@ -8,7 +8,7 @@
 #include <iostream>
 #include <vector>
 
-//----------------DEFINIÇÕES-------------
+//----------------DEFINIÇÕES----------------------------------//
     //MUX
         #define MUX_S0                42
         #define MUX_S1                41
@@ -82,7 +82,7 @@
         return VALOR_ESCALA - ((valor - minVal) * VALOR_ESCALA / (maxVal - minVal));
     }
 
-//--------------CLASSES------------------
+//---------------------------CLASSES-----------------------------------//
     class MOTOR{
     private:
         const int PWM_PIN;
