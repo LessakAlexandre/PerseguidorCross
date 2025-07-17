@@ -22,7 +22,7 @@
         #define PWM_RESOLUTION        10
         const float posicaoDesejada = 550;
         int baseSpeedIncrement =      300;      // Resolução: 10 bits (0-1023)
-        int baseSpeed =              140;
+        int baseSpeed =               140;
     //SENSORES
         #define NUM_SENSORES          12
         const int VALOR_ESCALA =      1000;
@@ -444,8 +444,6 @@ void taskRecordCoordinates(void *pvParameters)
     vTaskDelay(pdMS_TO_TICKS(15)); // aguarda 0,5 s
   }
 }
-
-
 void SensorTask(void*pvParameters){
     (void)pvParameters;
     while (true){
