@@ -27,8 +27,8 @@
         const int VALOR_ESCALA =      1000;
         bool calibrado =              false;
     //GIROSCOPIO
-        volatile float g_angle1 = 0.0f;
-        volatile float g_angle2 = 0.0f;
+        volatile float g_angle1 =     0.0f;
+        volatile float g_angle2 =     0.0f;
 
         volatile float g_lastAngle1 = 0.0f;
         volatile float g_lastAngle2 = 0.0f;
@@ -37,16 +37,16 @@
         volatile float g_totalDisp2 = 0.0f; // cm
 
     // Giroscópio (Z) em graus/s (dps)
-        volatile float g_gyroZ_dps = 0.0f;
-        float gyroOffset = 0;
+        volatile float g_gyroZ_dps =  0.0f;
+        float gyroOffset =            0;
 
     // Pose do robô
-        volatile float g_x     = 0.0f; // posição em X (cm)
-        volatile float g_y     = 0.0f; // posição em Y (cm)
-        volatile float g_theta = 0.0f; // orientação (rad)
+        volatile float g_x     =      0.0f; // posição em X (cm)
+        volatile float g_y     =      0.0f; // posição em Y (cm)
+        volatile float g_theta =      0.0f; // orientação (rad)
         float radius;
-        std::vector<float> radiusArray;
-        float velo = 450;
+        std::vector<float>            radiusArray;
+        float velo =                  450;
     //LED
         #define NEOPIXEL_PIN          43
         #define NEOPIXEL2_PIN         15
@@ -98,14 +98,17 @@
         //pinMode(FAULT_PIN, INPUT_PULLUP); -> INPUT_PULLUP valor HIGH por padrão
         void setMotorSpeed(int speed){
         // Se speed >= 0, direção para frente; caso contrário, ré.
-        if (speed >= 0) {
-            digitalWrite(this->DIR_PIN, LOW);
-        } else {
-            digitalWrite(this->DIR_PIN, HIGH);
-            speed = -speed;
+            if (speed >= 0) {
+                digitalWrite(this->DIR_PIN, LOW);
+            } else {
+                digitalWrite(this->DIR_PIN, HIGH);
+                speed = -speed;
+            }
+            speed = constrain(speed, 0, 1023);
+            ledcWrite(this->PWM_PIN, speed);
         }
-        speed = constrain(speed, 0, 1023);
-        ledcWrite(this->PWM_PIN, speed);
+        int getPin(){;
+            return PWM_PIN;
         }
     };
     class sensor{
@@ -165,14 +168,17 @@
     private:
         const int PIN;
         const int SPI_BUS_SPEED = 10000000;
+        AS5047P ENCODER;
         //AS5047P ENCONDER(PIN, SPI_BUS_SPEED);
     public:
-        encoder(int PIN_ENCODER):PIN(PIN_ENCODER){  
+        encoder(int PIN_ENCODER):PIN(PIN_ENCODER),ENCODER(PIN_ENCODER,SPI_BUS_SPEED){  
+        //confirmar se está certo o ENCODER
         }
-    
         float leitura(){
-            AS5047P ENCODER(PIN, SPI_BUS_SPEED);
             return ENCODER.readAngleDegree();
+        }
+        bool SPI(){
+            return ENCODER.initSPI();
         }
     };
     class giroscopio{
@@ -508,9 +514,9 @@ void setup(){
 
     // Configuração do receptor IR
 
-    ledcAttach(PWM_PIN, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(PWM_PIN2, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(PWM_PIN3, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(direito.getPin(), PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(esquerdo.getPin(), PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_PIN3, PWM_FREQ, PWM_RESOLUTION);
     pixels.setPixelColor(0, pixels.Color(51, 51, 204));
     pixels2.setPixelColor(0, pixels2.Color(51, 51, 204));
     pixels.show();
@@ -527,11 +533,11 @@ void setup(){
     pixels2.show();
 
     vTaskDelay(pdMS_TO_TICKS(2500));
-    while (!ENCODER_11.initSPI()) {
+    while (!ENCODER_11.SPI()){
         Serial.println(F("Erro ao conectar com o Encoder 1!"));
         delay(2000);
     }
-    while (!ENCODER_39.initSPI()) {
+    while (!ENCODER_39.SPI()){
         Serial.println(F("Erro ao conectar com o Encoder 1!"));
         delay(2000);
     }
