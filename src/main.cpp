@@ -21,7 +21,7 @@
         #define PWM_FREQ              37500   // Frequência PWM para os motores
         #define PWM_RESOLUTION        10
         const float posicaoDesejada = 550;
-        int baseSpeedIncrement =      300;      // Resolução: 10 bits (0-1023)
+        int baseSpeedIncrement =      300;     // Resolução: 10 bits (0-1023)
         int baseSpeed =               140;
     //SENSORES
         #define NUM_SENSORES          12
@@ -67,7 +67,7 @@
     //ROBO
         const float GEAR_RATIO      = 11.1f / 39.1f;   // Razão de engrenagem
         const float WHEEL_DIAMETER  = 22.5f;           // Diâmetro da roda (mm)
-        const float WHEEL_CIRCUMF_CM= (WHEEL_DIAMETER * 3.14159265359f) / 10.0f; // Circunferência em cm
+        const float WHEEL_CIRCUMF_CM=(WHEEL_DIAMETER * 3.14159265359f) / 10.0f; // Circunferência em cm
         const float WHEEL_BASE      = 0.135f;           // Distância entre as rodas (m)
 //--------------FUNÇÕES------------------
     inline void setMuxChannel(int canal) {
@@ -247,6 +247,7 @@
         encoder ENCODER_39(8);
     //GIROSCOPIO
         giroscopio GYRO; //Ta certo assim?
+    //PID
         pid PID(0.475 , 0.0 , 0.075 , 550);
 //------------------------------TASKS-----------------------------------//
 void taskReadSensors(void *pvParameters){
