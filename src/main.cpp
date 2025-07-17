@@ -80,8 +80,6 @@
         return VALOR_ESCALA - ((valor - minVal) * VALOR_ESCALA / (maxVal - minVal));
     }
 
-sdadsada
-
 //--------------CLASSES------------------
     class MOTOR{
     private:
@@ -169,11 +167,11 @@ sdadsada
         //AS5047P ENCONDER(PIN, SPI_BUS_SPEED);
     public:
         encoder(int PIN_ENCODER):PIN(PIN_ENCODER){  
-        AS5047P ENCODER(PIN, SPI_BUS_SPEED);
         }
     
         float leitura(){
-        return ENCODER.readAngleDegree();
+            AS5047P ENCODER(PIN, SPI_BUS_SPEED);
+            return ENCODER.readAngleDegree();
         }
     };
     class giroscopio{
@@ -213,11 +211,10 @@ sdadsada
       float lastPosicao = posicaoDesejada;
     
     public:
-      pid(float KP, float KI , float KD,float POSICAO_DESEJADA ){
+      pid(float KP, float KI , float KD,float POSICAO_DESEJADA ):posicaoDesejada(POSICAO_DESEJADA){
         kp = KP;
         ki = KI;
         kd = KD;
-        posicaoDesejada = POSICAO_DESEJADA;
       }
       float corretcion(volatile float posicao,float dt){
         float error = this->posicaoDesejada - posicao;
@@ -239,10 +236,47 @@ sdadsada
         encoder ENCODER_11(1);
         encoder ENCODER_39(8);
     //GIROSCOPIO
-        giroscopio GIROSCOPIO(1); // pq tive que colocar esse 1 se não tem construtor
-    //PID
+        giroscopio GIROSCOPIO; //Ta certo assim?
         pid PID(0.475 , 0.0 , 0.075 , 550);
 //------------------------------TASKS-----------------------------------//
+void taskReadSensors(void *pvParameters){
+  (void) pvParameters;
+
+  float initAngle1 = ENCODER_11.leitura();
+  float initAngle2 = ENCODER_39.leitura();
+
+  xSemaphoreTake(xMutex, portMAX_DELAY);
+  g_lastAngle1 = initAngle1;
+  g_lastAngle2 = initAngle2;
+  xSemaphoreGive(xMutex);
+
+  // Exemplo de sensibilidade para ±4000 dps (ajuste conforme datasheet)
+  const float SENSITIVITY_4000DPS = 0.140f;
+
+  for (;;)
+  {
+    float angle1 = ENCODER_11.leitura();
+    float angle2 = ENCODER_39.leitura();
+
+    // Ler giroscópio bruto
+    int32_t gyroRaw[3];
+    AccGyr.Get_G_Axes(gyroRaw);
+
+    // Converte para dps (exemplo LSB -> dps)
+    float gyroZ_dps = gyroRaw[2];
+
+    xSemaphoreTake(xMutex, portMAX_DELAY);
+    g_angle1    = angle1;
+    g_angle2    = angle2;
+    g_gyroZ_dps = gyroZ_dps;
+    xSemaphoreGive(xMutex);
+
+    // Espera 5 ms (aprox.) até a próxima leitura
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+
+
 void SensorTask(void*pvParameters){
     (void)pvParameters;
     while (true){
@@ -255,7 +289,7 @@ void ControlTask(void *pvParameters) {
         unsigned long now = millis();
         float dt = (now - lastTime) / 1000.0;
         if(dt>=0){
-            float Correcao=PID.corretcion(posicao,dt)
+            float correcao=PID.corretcion(posicao,dt)
             
             int leftSpeed  = baseSpeed - (int)correcao;
             int rightSpeed = -(baseSpeed + (int)correcao);
