@@ -7,6 +7,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <iostream>
 #include <vector>
+#include "motor.hpp"
 
 //----------------DEFINIÇÕES-------------
     //MUX
@@ -82,37 +83,7 @@
         return VALOR_ESCALA - ((valor - minVal) * VALOR_ESCALA / (maxVal - minVal));
     }
 
-//--------------CLASSES------------------
-    class MOTOR{
-    private:
-        const int PWM_PIN;
-        const int DIR_PIN;
-        int baseSpeed;
-
-    public:
-        //---------------------construtor-------------------------//
-        MOTOR(int PWM_pin,int DIR_pin,int BASE_SPEED):PWM_PIN(PWM_pin), DIR_PIN(DIR_pin){ 
-            pinMode(DIR_PIN, OUTPUT);
-            baseSpeed = BASE_SPEED;
-        
-        }
-        //----------------------Funções---------------------------//
-        //pinMode(FAULT_PIN, INPUT_PULLUP); -> INPUT_PULLUP valor HIGH por padrão
-        void setMotorSpeed(int speed){
-        // Se speed >= 0, direção para frente; caso contrário, ré.
-            if (speed >= 0) {
-                digitalWrite(this->DIR_PIN, LOW);
-            } else {
-                digitalWrite(this->DIR_PIN, HIGH);
-                speed = -speed;
-            }
-            speed = constrain(speed, 0, 1023);
-            ledcWrite(this->PWM_PIN, speed);
-        }
-        int getPin(){;
-            return PWM_PIN;
-        }
-    };
+//---------------------------CLASSES------------------------------------//
     class sensor{
     private:
         float lastPosicao;
@@ -226,7 +197,7 @@
         ki = KI;
         kd = KD;
       }
-      float corretcion(volatile float posicao,float dt){
+      float correction(volatile float posicao,float dt){
         float error = this->posicaoDesejada - posicao;
         float derivative = (error - lastError) / dt;
         integral += error * dt;
@@ -243,17 +214,17 @@
         sensor Frontais(550);
     //sensor Lateral(/*PINO*/);
     //ENCONDER
-        encoder ENCODER_11(1);
-        encoder ENCODER_39(8);
+        encoder encoder_11(1);
+        encoder encoder_39(8);
     //GIROSCOPIO
         giroscopio GYRO; //Ta certo assim?
-        pid PID(0.475 , 0.0 , 0.075 , 550);
+        pid pidPosicao(0.475 , 0.0 , 0.075 , 550);
 //------------------------------TASKS-----------------------------------//
-void taskReadSensors(void *pvParameters){
+void taskReadAngle(void *pvParameters){
   (void) pvParameters;
 
-  float initAngle1 = ENCODER_11.leitura();
-  float initAngle2 = ENCODER_39.leitura();
+  float initAngle1 = encoder_11.leitura();
+  float initAngle2 = encoder_39.leitura();
 
   xSemaphoreTake(xMutex, portMAX_DELAY);
   g_lastAngle1 = initAngle1;
@@ -265,8 +236,8 @@ void taskReadSensors(void *pvParameters){
 
   for (;;)
   {
-    float angle1 = ENCODER_11.leitura();
-    float angle2 = ENCODER_39.leitura();
+    float angle1 = encoder_11.leitura();
+    float angle2 = encoder_39.leitura();
 
     // Ler giroscópio bruto
     int32_t gyroRaw[3];
@@ -281,7 +252,7 @@ void taskReadSensors(void *pvParameters){
     g_gyroZ_dps = gyroZ_dps;
     xSemaphoreGive(xMutex);
 
-    // Espera 5 ms (aprox.) até a próxima leitura
+    // Espera 1 ms (aprox.) até a próxima leitura
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
@@ -295,7 +266,7 @@ void taskComputeOdom(void *pvParameters)
   const float gain = 0.15;
   const float max_vel = 400;
   const float min_vel = 150;
-  float facter = straight / adjust_x;
+  float factor = straight / adjust_x;
   float lastDisp = 0;
   float lastTheta = 0;
 
@@ -353,8 +324,9 @@ void taskComputeOdom(void *pvParameters)
 
     // Integra a velocidade angular filtrada para atualizar o ângulo
     xSemaphoreTake(xMutex, portMAX_DELAY);
+    // por que nao so usar o filtro complementar nos delta thetas?
     g_theta += filteredOmega * dt; // integrando velocidade angular para encontrar theta
-    float thetaRounded = roundf(g_theta * 100.0f) / 100.0f;
+    float thetaRounded = roundf(g_theta * 100.0f) / 100.0f; // usa so duas casas decimais
     // Atualiza os ângulos anteriores dos encoders para a próxima iteração
     g_lastAngle1 = angle1;
     g_lastAngle2 = angle2;
@@ -369,7 +341,7 @@ void taskComputeOdom(void *pvParameters)
       radius = abs(((abs(totalDisp) - lastDisp) / (g_theta - lastTheta)));
       radiusArray.push_back(radius);
 
-      velo = (1 / (1 + exp(-(gain / facter) * radius + (adjust_x / 2) * gain))) * (max_vel - min_vel) + min_vel + adjust_y ;
+      velo = (1 / (1 + exp(-(gain / factor) * radius + (adjust_x / 2) * gain))) * (max_vel - min_vel) + min_vel + adjust_y ;
       //velo = 1e-3 * radius * radius * ((max_vel - min_vel) / 100) + min_vel;
       lastDisp = abs(totalDisp);
       lastTheta = g_theta;
@@ -450,6 +422,7 @@ void SensorTask(void*pvParameters){
     (void)pvParameters;
     while (true){
         posicao = Frontais.leitura();//aqui poderia não usar essa task e colocar direto?
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 void ControlTask(void *pvParameters) {
@@ -459,8 +432,9 @@ void ControlTask(void *pvParameters) {
         unsigned long now = millis();
         float dt = (now - lastTime) / 1000.0;
         if(dt>=0){
-            float correcao=PID.corretcion(posicao,dt);
-            
+            float correcao=pidPosicao.correction(posicao,dt);
+            //pidVelocidade.correction(totalDisp/dt,dt);
+            //correcaoPos + correcaoVel
             int leftSpeed  = baseSpeed - (int)correcao;
             int rightSpeed = -(baseSpeed + (int)correcao);
             
@@ -487,7 +461,7 @@ void setup(){
     AccGyr.Enable_X();
     AccGyr.Enable_G();
     //
-    float gyroOffset = GYRO.calibrateSensor();
+    gyroOffset = GYRO.calibrateSensor();
     
     if (!SPIFFS.begin(true)) {
         Serial.println("Erro ao montar SPIFFS");
@@ -536,11 +510,11 @@ void setup(){
     pixels2.show();
 
     vTaskDelay(pdMS_TO_TICKS(2500));
-    while (!ENCODER_11.SPI()){
+    while (!encoder_11.SPI()){
         Serial.println(F("Erro ao conectar com o Encoder 1!"));
         delay(2000);
     }
-    while (!ENCODER_39.SPI()){
+    while (!encoder_39.SPI()){
         Serial.println(F("Erro ao conectar com o Encoder 1!"));
         delay(2000);
     }
@@ -551,10 +525,11 @@ void setup(){
         Serial.println("Erro ao criar Mutex!");
     }
     //Cria as Task
-    xTaskCreatePinnedToCore(taskReadSensors,  "TaskReadSensors",  4096, NULL,3, NULL, 1);
+    xTaskCreatePinnedToCore(taskReadAngle,  "TaskReadSensors",  4096, NULL,3, NULL, 1);
     xTaskCreatePinnedToCore(ControlTask,  "ControlTask",  4096, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(SensorTask,  "SensorTask",  4096, NULL, 2, NULL, 0);
     xTaskCreatePinnedToCore(taskComputeOdom,  "TaskComputeOdom",  4096, NULL, 2, NULL, 1);
     xTaskCreatePinnedToCore(taskRecordCoordinates, "TaskRecordCoordinates", 4096, NULL, 1, NULL, 1);
+
+    vTaskDelete(NULL);
 }
-void loop(){}
