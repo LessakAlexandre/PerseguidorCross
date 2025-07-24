@@ -490,7 +490,7 @@ void setup(){
     AccGyr.Enable_X();
     AccGyr.Enable_G();
     //
-    float gyroOffset = GYRO.calibrateSensor();
+    gyroOffset = GYRO.calibrateSensor();
     
     if (!SPIFFS.begin(true)) {
         Serial.println("Erro ao montar SPIFFS");
