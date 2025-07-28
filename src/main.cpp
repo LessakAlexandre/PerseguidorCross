@@ -3,257 +3,40 @@
 #include <Wire.h>
 #include <LSM6DSRSensor.h>
 #include <SPI.h>
-#include "SPIFFS.h"   // Biblioteca para manipulação do sistema de arquivos SPIFFS
-#include <Adafruit_NeoPixel.h>
+#include "SPIFFS.h"             // Biblioteca para manipulação do sistema de arquivos SPIFFS
+#include <Adafruit_NeoPixel.h>  // LED
 #include <iostream>
-#include <vector>
+#include <vector> 
+#include <IRremote.h>
 
-//----------------DEFINIÇÕES-------------
-    //MUX
-        #define MUX_S0                42
-        #define MUX_S1                41
-        #define MUX_S2                9
-        #define MUX_S3                3
-        #define MUX_SIG               2
-    SemaphoreHandle_t xMutex;
-    //MOTORES
-        #define PWM_PIN3              40      // pino para MCPWM (exemplo)
-        #define PWM_FREQ              37500   // Frequência PWM para os motores
-        #define PWM_RESOLUTION        10
-        const float posicaoDesejada = 550;
-        int baseSpeedIncrement =      300;      // Resolução: 10 bits (0-1023)
-        int baseSpeed =              140;
-    //SENSORES
-        #define NUM_SENSORES          12
-        const int VALOR_ESCALA =      1000;
-        bool calibrado =              false;
-    //GIROSCOPIO
-        volatile float g_angle1 =     0.0f;
-        volatile float g_angle2 =     0.0f;
-
-        volatile float g_lastAngle1 = 0.0f;
-        volatile float g_lastAngle2 = 0.0f;
-
-        volatile float g_totalDisp1 = 0.0f; // cm
-        volatile float g_totalDisp2 = 0.0f; // cm
-
-    // Giroscópio (Z) em graus/s (dps)
-        volatile float g_gyroZ_dps =  0.0f;
-        float gyroOffset =            0;
-
-    // Pose do robô
-        volatile float g_x     =      0.0f; // posição em X (cm)
-        volatile float g_y     =      0.0f; // posição em Y (cm)
-        volatile float g_theta =      0.0f; // orientação (rad)
-        float radius;
-        std::vector<float>            radiusArray;
-        float velo =                  450;
-    //LED
-        #define NEOPIXEL_PIN          43
-        #define NEOPIXEL2_PIN         15
-        #define NUMPIXELS             1
-        Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
-        Adafruit_NeoPixel pixels2(NUMPIXELS, NEOPIXEL2_PIN, NEO_GRB + NEO_KHZ800);
-    //I2C
-        #define I2C_SDA               5
-        #define I2C_SCL               4
-        #define LSM6DSR_ADDRESS LSM6DSR_I2C_ADD_L
-        TwoWire I2C_BUS = TwoWire(0);
-        LSM6DSRSensor AccGyr(&I2C_BUS, LSM6DSR_ADDRESS);
-    //GLOBAIS
-        volatile float posicao =      0.0;   // Posição calculada dos sensores
-        volatile bool robotEnabled =  false; // Se falso, os motores são desligados
-        volatile bool fanControl =    false;
-    //ROBO
-        const float GEAR_RATIO      = 11.1f / 39.1f;   // Razão de engrenagem
-        const float WHEEL_DIAMETER  = 22.5f;           // Diâmetro da roda (mm)
-        const float WHEEL_CIRCUMF_CM= (WHEEL_DIAMETER * 3.14159265359f) / 10.0f; // Circunferência em cm
-        const float WHEEL_BASE      = 0.135f;           // Distância entre as rodas (m)
-//--------------FUNÇÕES------------------
-    inline void setMuxChannel(int canal) {
-        digitalWrite(MUX_S0, (canal & 0x01) ? HIGH : LOW);
-        digitalWrite(MUX_S1, (canal & 0x02) ? HIGH : LOW);
-        digitalWrite(MUX_S2, (canal & 0x04) ? HIGH : LOW);
-        digitalWrite(MUX_S3, (canal & 0x08) ? HIGH : LOW);
-    }
-    int mapearValorSensorInvertido(int valor, int minVal, int maxVal) {
-        if (valor <= minVal) return VALOR_ESCALA;
-        if (valor >= maxVal) return 0;
-        return VALOR_ESCALA - ((valor - minVal) * VALOR_ESCALA / (maxVal - minVal));
-    }
-
-//--------------CLASSES------------------
-    class MOTOR{
-    private:
-        const int PWM_PIN;
-        const int DIR_PIN;
-        int baseSpeed;
-
-    public:
-        //---------------------construtor-------------------------//
-        MOTOR(int PWM_pin,int DIR_pin,int BASE_SPEED):PWM_PIN(PWM_pin), DIR_PIN(DIR_pin){ 
-            pinMode(DIR_PIN, OUTPUT);
-            baseSpeed = BASE_SPEED;
-        
-        }
-        //----------------------Funções---------------------------//
-        //pinMode(FAULT_PIN, INPUT_PULLUP); -> INPUT_PULLUP valor HIGH por padrão
-        void setMotorSpeed(int speed){
-        // Se speed >= 0, direção para frente; caso contrário, ré.
-            if (speed >= 0) {
-                digitalWrite(this->DIR_PIN, LOW);
-            } else {
-                digitalWrite(this->DIR_PIN, HIGH);
-                speed = -speed;
-            }
-            speed = constrain(speed, 0, 1023);
-            ledcWrite(this->PWM_PIN, speed);
-        }
-        int getPin(){;
-            return PWM_PIN;
-        }
-    };
-    class sensor{
-    private:
-        float lastPosicao;
-        long somaPonderada = 0;
-        long somaValores = 0;
-        int sensorMin[NUM_SENSORES];
-        int sensorMax[NUM_SENSORES];
-        int sensorValues[NUM_SENSORES];
-        const int sensorPos[NUM_SENSORES] = {0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100};
-    public:
-
-        sensor(float PosicaoInicial){
-        lastPosicao = PosicaoInicial;
-        }
-        void calibracao(){
-            for (int i = 0; i < NUM_SENSORES; i++) {
-                sensorMin[i] = 65535;
-                sensorMax[i] = 0;
-            }
-            unsigned long tempoCalibracao = millis();
-            while (millis() - tempoCalibracao < 5000) {
-                for (int i = 0; i < NUM_SENSORES; i++) {
-                setMuxChannel(i);
-                int leitura = analogRead(MUX_SIG);
-                if (leitura < sensorMin[i]) sensorMin[i] = leitura;
-                if (leitura > sensorMax[i]) sensorMax[i] = leitura;
-                }
-            }
-        }
-        volatile float leitura(){
-            for (int i = 0; i < NUM_SENSORES; i++) {
-                setMuxChannel(i);
-                int leitura = analogRead(MUX_SIG);
-                int valorSensor = mapearValorSensorInvertido(leitura, sensorMin[i], sensorMax[i]);
-                sensorValues[i] = valorSensor;
-                somaPonderada += (long)valorSensor * sensorPos[i];
-                somaValores += valorSensor;
-            }
-            float pos = (somaValores > 0) ? ((float)somaPonderada / somaValores) : lastPosicao;
-            lastPosicao = pos;
-            return pos;
-        }
-    };
-    class sensor_lateral{
-    private:
-        const int SENSOR_PIN;
-
-    public:
-        sensor_lateral(int sensor_pin):SENSOR_PIN(sensor_pin){}
-        int leitura(){
-        return digitalRead(SENSOR_PIN);
-        }
-    };
-    class encoder{
-    private:
-        const int PIN;
-        const int SPI_BUS_SPEED = 10000000;
-        AS5047P ENCODER;
-        //AS5047P ENCONDER(PIN, SPI_BUS_SPEED);
-    public:
-        encoder(int PIN_ENCODER):PIN(PIN_ENCODER),ENCODER(PIN_ENCODER,SPI_BUS_SPEED){  
-        //confirmar se está certo o ENCODER
-        }
-        float leitura(){
-            return ENCODER.readAngleDegree();
-        }
-        bool SPI(){
-            return ENCODER.initSPI();
-        }
-    };
-    class giroscopio{
-    private:
-        int32_t gyroRaw[3];
-        const int numSamples = 1000;  
-        float sumGyro = 0;
-        float Offset;
-    public:
-        float calibrateSensor() {
-            int32_t gyroData[3];
-            Serial.println("Calibrando o sensor... Mantenha-o imóvel.");
-            delay(2000);
-            for (int i = 0; i < numSamples; i++) {
-                AccGyr.Get_G_Axes(gyroData);
-                sumGyro += gyroData[2];
-                delay(5);
-            }
-            Offset = sumGyro / numSamples;
-            
-            Serial.print("Giroscópio Offsets: ");
-            Serial.println(gyroOffset);
-            return Offset;
-        }
-        float leitura(){
-            AccGyr.Get_G_Axes(gyroRaw);
-            return gyroRaw[2];
-        }
-    };
-    class pid{
-    private:
-      float kp;
-      float ki;
-      float kd;
-      float integral = 0.0;
-      float lastError = 0.0;
-      const float posicaoDesejada;
-      float lastPosicao = posicaoDesejada;
-    
-    public:
-      pid(float KP, float KI , float KD,float POSICAO_DESEJADA ):posicaoDesejada(POSICAO_DESEJADA){
-        kp = KP;
-        ki = KI;
-        kd = KD;
-      }
-      float corretcion(volatile float posicao,float dt){
-        float error = this->posicaoDesejada - posicao;
-        float derivative = (error - lastError) / dt;
-        integral += error * dt;
-        lastError = error;
-        return float(kp * error + ki * integral + kd * derivative);
-    }
-
-};
+#include "BT.h" // Manipulação de Bluetooth  
+#include "BT.cpp" 
+#include "defines.h"
+#include "gyro.hpp"
+#include "encoder.hpp"
+#include "pid.hpp"
+#include "sensores.hpp"
+#include "motor.hpp"
 //---------------------------OBJETOS------------------------------------//
     //MOTORES
-        MOTOR esquerdo(13,12,baseSpeed);
-        MOTOR direito(48,47,baseSpeed);
+        motor Esquerdo(13,12,baseSpeed);
+        motor Direito(48,47,baseSpeed);
     //SENSORES 
         sensor Frontais(550);
-    //sensor Lateral(/*PINO*/);
+        sensor_lateral Lateral(1/*Pino sensor lateral*/);
     //ENCONDER
-        encoder ENCODER_11(1);
-        encoder ENCODER_39(8);
+        encoder Enconder_11(1);
+        encoder Encoder_39(8);
     //GIROSCOPIO
-        giroscopio GYRO; //Ta certo assim?
-        pid PID(0.475 , 0.0 , 0.075 , 550);
+        giroscopio Gyro; //Ta certo assim?
+    //PID
+        pid Pid(0.475 , 0.0 , 0.075 , 550);
 //------------------------------TASKS-----------------------------------//
 void taskReadSensors(void *pvParameters){
   (void) pvParameters;
 
-  float initAngle1 = ENCODER_11.leitura();
-  float initAngle2 = ENCODER_39.leitura();
+  float initAngle1 = Enconder_11.leitura();
+  float initAngle2 = Encoder_39.leitura();
 
   xSemaphoreTake(xMutex, portMAX_DELAY);
   g_lastAngle1 = initAngle1;
@@ -265,8 +48,8 @@ void taskReadSensors(void *pvParameters){
 
   for (;;)
   {
-    float angle1 = ENCODER_11.leitura();
-    float angle2 = ENCODER_39.leitura();
+    float angle1 = Enconder_11.leitura();
+    float angle2 = Encoder_39.leitura();
 
     // Ler giroscópio bruto
     int32_t gyroRaw[3];
@@ -396,7 +179,7 @@ void taskRecordCoordinates(void *pvParameters)
   (void) pvParameters;
   // Aguarda 2 segundos para que os sensores estejam estabilizados
   vTaskDelay(pdMS_TO_TICKS(2000));
-  File readFile = SPIFFS.open("/data.txt", FILE_READ);
+  File readFile = SPIFFS.open("../data/coordenadas.txt", FILE_READ);
   if (!readFile) {
     Serial.println("Erro ao abrir data.txt para leitura!");
     vTaskDelete(NULL);
@@ -444,8 +227,6 @@ void taskRecordCoordinates(void *pvParameters)
     vTaskDelay(pdMS_TO_TICKS(15)); // aguarda 0,5 s
   }
 }
-
-
 void SensorTask(void*pvParameters){
     (void)pvParameters;
     while (true){
@@ -459,102 +240,225 @@ void ControlTask(void *pvParameters) {
         unsigned long now = millis();
         float dt = (now - lastTime) / 1000.0;
         if(dt>=0){
-            float correcao=PID.corretcion(posicao,dt);
+            float correcao=Pid.corretcion(posicao,dt);
             
             int leftSpeed  = baseSpeed - (int)correcao;
             int rightSpeed = -(baseSpeed + (int)correcao);
             
             leftSpeed  = constrain(leftSpeed, 10, 800);
             rightSpeed = constrain(rightSpeed, -800, -10);
-            direito.setMotorSpeed(rightSpeed);
-            esquerdo.setMotorSpeed(leftSpeed);
+            Direito.setMotorSpeed(rightSpeed);
+            Esquerdo.setMotorSpeed(leftSpeed);
 
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
+void IRTask(void *pvParameters) {
+  (void) pvParameters;
+  while (true) {
+    if (IrReceiver.decode()) {
+      int comando = IrReceiver.decodedIRData.command;
+      Serial.println(comando);
+      // Se o código recebido for o definido para ligar/desligar:
+      if (comando == IR_POWER_CODE) {
+        robotEnabled = !robotEnabled;  // Alterna o estado
+        if(!robotEnabled) {
+          digitalWrite(Direito.getDir(), LOW);
+          digitalWrite(Esquerdo.getDir(), LOW);
+        } else {
+          baseSpeed = baseSpeedIncrement;
+          Serial.println(baseSpeed);
+        }
+        Serial.print("Robot ");
+        Serial.println(robotEnabled ? "ligado" : "desligado");
+        pixels.show();
+        pixels2.show();
+      }
+      
+      
+      if (comando == IR_FAN) {
+        fanControl = !fanControl;
+        if(!fanControl) {
+          ledcWrite(FAN_CHANNEL, 0);
+        } else {
+          for (int duty = 10; duty <= 600; duty+=10) {
+              ledcWrite(FAN_CHANNEL, duty);
+              vTaskDelay(pdMS_TO_TICKS(35));
+          }
+        }
+      }
+      if (comando == 88) {
+        baseSpeedIncrement = baseSpeedIncrement + 20;
+        digitalWrite(BUZZER, 1);
+        delay(100);
+        digitalWrite(BUZZER,0);
+        
+      }
+      if (comando == 89) {
+        baseSpeedIncrement = baseSpeedIncrement - 20;
+        digitalWrite(BUZZER, 1);
+        delay(100);
+        digitalWrite(BUZZER,0);
+      }
+      int red = constrain(map(baseSpeedIncrement, 250, 400, 0, 255), 0, 255);
+      pixels.setPixelColor(0, pixels.Color(red, 100, 0));
+      pixels2.setPixelColor(0, pixels2.Color(red, 100, 0));
+      pixels.show();
+      pixels2.show();
+    }
+    IrReceiver.resume();
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+void BtTask(void *pvParameters){
+  (void) pvParameters;
+  while (true){
+    // Verifica se o dispositivo está conectado
+    if(!dispositivo_Conectado && dispositivoAntigo_Conectado){
+      delay(500);
+      pServer->startAdvertising(); // Reinicia a propagação do BLE
+      dispositivoAntigo_Conectado = dispositivo_Conectado;
+    }
+
+    // Se o dispositivo estiver conectado e não houver um dispositivo antigo conectado
+    if(dispositivo_Conectado && !dispositivoAntigo_Conectado){
+      dispositivoAntigo_Conectado = dispositivo_Conectado;
+    }
+    //Recebe os comandos do BT
+    switch (BT_Handler.getState()){
+    case STOP_STATE:
+      digitalWrite(Direito.getDir(), LOW);
+      digitalWrite(Esquerdo.getDir(), LOW);
+      break;
+    
+    case CALIBRATION_STATE:
+      if(calibrado){
+        Serial.println("Tudo certo com os sensores");
+      }
+      else{
+        Serial.println("Problema com a calibração");
+      }
+      break;
+    case STAR_STATE:
+        bool end_of_lap_state = digitalRead(Lateral.getPin());
+        if(last_lap_state && !end_of_lap_state) Lateral.count_lap();  
+        last_lap_state = end_of_lap_state;
+        if(!robotEnabled && millis()-stop_time>500 /*BRAKE_TIME_MS*/){
+          robotEnabled = true;
+          bluetooth_states_t state = STOP_STATE;
+        }
+    default:
+      break;
+    }
+  }
+}
+
+
+
 
 void setup(){
-    Serial.begin(115200);
-    delay(1000);
-    Serial.println("Inicializando...");
-    I2C_BUS.setClock(400000);
-    I2C_BUS.begin(I2C_SDA, I2C_SCL);
-    
-    AccGyr.begin();
-    AccGyr.Set_G_ODR_With_Mode(6667.0f, LSM6DSR_GYRO_LOW_POWER_NORMAL_MODE);
-    AccGyr.Set_G_FS(2000); // Se suportado, configure o giroscópio para ±4000 dps
-    AccGyr.Enable_X();
-    AccGyr.Enable_G();
-    //
-    float gyroOffset = GYRO.calibrateSensor();
-    
-    if (!SPIFFS.begin(true)) {
-        Serial.println("Erro ao montar SPIFFS");
-        return;
-    }
-    SPI.begin(18, 17, 16);
+  Serial.begin(115200);
+  // Inicializa o Bluetooth
+    BLEDevice::init("THANOS_BLE"); // Nome do dispositivo Bluetooth
+    // Cria o servidor BLE
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
+    //Cria o serviço BLE
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+    //Cria a característica BLE para TX
+    pTxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY);
+    pTxCharacteristic->addDescriptor(new BLE2902());
+    //Cria a característica BLE para RX
+    BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE);
+    pRxCharacteristic->setCallbacks(new MyCallbacks());
+    // Inicia o serviço BLE
+    pService->start();
+    // Inicia a propagação do BLE
+    pServer->getAdvertising()->start();
+    Serial.println("Esperando por um dispositivo conectado...");
+  
+  delay(1000);
+  Serial.println("Inicializando...");
+  I2C_BUS.setClock(400000);
+  I2C_BUS.begin(I2C_SDA, I2C_SCL);
+  
+  AccGyr.begin();
+  AccGyr.Set_G_ODR_With_Mode(6667.0f, LSM6DSR_GYRO_LOW_POWER_NORMAL_MODE);
+  AccGyr.Set_G_FS(2000); // Se suportado, configure o giroscópio para ±4000 dps
+  AccGyr.Enable_X();
+  AccGyr.Enable_G();
+  //
+  gyroOffset = Gyro.calibrateSensor();
+  
+  if (!SPIFFS.begin(true)) {
+      Serial.println("Erro ao montar SPIFFS");
+      return;
+  }
+  SPI.begin(18, 17, 16);
 
-    pixels.begin();
-    pixels.clear();
-    pixels.show();
-    pixels2.begin();
-    pixels2.clear();
-    pixels2.show();
-    pixels.setBrightness(50);
-    pixels2.setBrightness(50);
-    
-    // Configuração dos pinos para o multiplexador
-    pinMode(MUX_S0, OUTPUT);
-    pinMode(MUX_S1, OUTPUT);
-    pinMode(MUX_S2, OUTPUT);
-    pinMode(MUX_S3, OUTPUT);
+  pixels.begin();
+  pixels.clear();
+  pixels.show();
+  pixels2.begin();
+  pixels2.clear();
+  pixels2.show();
+  pixels.setBrightness(50);
+  pixels2.setBrightness(50);
+  
+  // Configuração dos pinos para o multiplexador
+  pinMode(MUX_S0, OUTPUT);
+  pinMode(MUX_S1, OUTPUT);
+  pinMode(MUX_S2, OUTPUT);
+  pinMode(MUX_S3, OUTPUT);
 
-    // Configuração do pino analógico do multiplexador
-    pinMode(MUX_SIG, INPUT);
+  // Configuração do pino analógico do multiplexador
+  pinMode(MUX_SIG, INPUT);
 
-    analogReadResolution(16);
+  analogReadResolution(16);
 
-    // Configuração do receptor IR
+  // Configuração do receptor IR
 
-    ledcSetup(direito.getPin(), PWM_FREQ, PWM_RESOLUTION);
-    ledcSetup(esquerdo.getPin(), PWM_FREQ, PWM_RESOLUTION);
-    ledcSetup(PWM_PIN3, PWM_FREQ, PWM_RESOLUTION);
-    pixels.setPixelColor(0, pixels.Color(51, 51, 204));
-    pixels2.setPixelColor(0, pixels2.Color(51, 51, 204));
-    pixels.show();
-    pixels2.show();
-    
-    //Calibração dos sensores(5 segundos)
-    Frontais.calibracao();
-    calibrado = true;
-    Serial.println("Calibração dos sensores concluída.");
+  ledcSetup(Direito.getPin(), PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(Esquerdo.getPin(), PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_PIN3, PWM_FREQ, PWM_RESOLUTION);
+  pixels.setPixelColor(0, pixels.Color(51, 51, 204));
+  pixels2.setPixelColor(0, pixels2.Color(51, 51, 204));
+  pixels.show();
+  pixels2.show();
+  
+  //Calibração dos sensores(5 segundos)
+  Frontais.calibracao();
+  calibrado = true;
+  Serial.println("Calibração dos sensores concluída.");
 
-    pixels.setPixelColor(0, pixels.Color(0, 30, 255));
-    pixels2.setPixelColor(0, pixels2.Color(0, 30, 255));
-    pixels.show();
-    pixels2.show();
+  pixels.setPixelColor(0, pixels.Color(0, 30, 255));
+  pixels2.setPixelColor(0, pixels2.Color(0, 30, 255));
+  pixels.show();
+  pixels2.show();
 
-    vTaskDelay(pdMS_TO_TICKS(2500));
-    while (!ENCODER_11.SPI()){
-        Serial.println(F("Erro ao conectar com o Encoder 1!"));
-        delay(2000);
-    }
-    while (!ENCODER_39.SPI()){
-        Serial.println(F("Erro ao conectar com o Encoder 1!"));
-        delay(2000);
-    }
-    // Inicializa I2C e IMU
-    // Cria Mutex
-    xMutex = xSemaphoreCreateMutex();
-    if (xMutex == NULL) {
-        Serial.println("Erro ao criar Mutex!");
-    }
-    //Cria as Task
-    xTaskCreatePinnedToCore(taskReadSensors,  "TaskReadSensors",  4096, NULL,3, NULL, 1);
-    xTaskCreatePinnedToCore(ControlTask,  "ControlTask",  4096, NULL, 1, NULL, 0);
-    xTaskCreatePinnedToCore(SensorTask,  "SensorTask",  4096, NULL, 2, NULL, 0);
-    xTaskCreatePinnedToCore(taskComputeOdom,  "TaskComputeOdom",  4096, NULL, 2, NULL, 1);
-    xTaskCreatePinnedToCore(taskRecordCoordinates, "TaskRecordCoordinates", 4096, NULL, 1, NULL, 1);
+  vTaskDelay(pdMS_TO_TICKS(2500));
+  while (!Enconder_11.SPI()){
+      Serial.println(F("Erro ao conectar com o Encoder 1!"));
+      delay(2000);
+  }
+  while (!Encoder_39.SPI()){
+      Serial.println(F("Erro ao conectar com o Encoder 1!"));
+      delay(2000);
+  }
+  // Inicializa I2C e IMU
+  // Cria Mutex
+  xMutex = xSemaphoreCreateMutex();
+  if (xMutex == NULL) {
+      Serial.println("Erro ao criar Mutex!");
+  }
+  //Cria as Task
+  xTaskCreatePinnedToCore(taskReadSensors,  "TaskReadSensors",  4096, NULL,4, NULL, 1);
+  xTaskCreatePinnedToCore(ControlTask,  "ControlTask",  4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(SensorTask,  "SensorTask",  4096, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(taskComputeOdom,  "TaskComputeOdom",  4096, NULL, 3, NULL, 1);
+  xTaskCreatePinnedToCore(taskRecordCoordinates, "TaskRecordCoordinates", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(IRTask, "IRTask", 2048, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(BtTask, "BtTask", 2048,NULL, 0, NULL, 1);
 }
 void loop(){}
