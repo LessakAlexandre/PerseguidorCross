@@ -8,6 +8,7 @@
 #include <iostream>
 #include <vector>
 
+#include "pid.hpp"
 #include "sensores.hpp"
 #include "motor.hpp"
 
@@ -107,31 +108,6 @@
             return gyroRaw[2];
         }
     };
-    class pid{
-    private:
-      float kp;
-      float ki;
-      float kd;
-      float integral = 0.0;
-      float lastError = 0.0;
-      const float posicaoDesejada;
-      float lastPosicao = posicaoDesejada;
-    
-    public:
-      pid(float KP, float KI , float KD,float POSICAO_DESEJADA ):posicaoDesejada(POSICAO_DESEJADA){
-        kp = KP;
-        ki = KI;
-        kd = KD;
-      }
-      float corretcion(volatile float posicao,float dt){
-        float error = this->posicaoDesejada - posicao;
-        float derivative = (error - lastError) / dt;
-        integral += error * dt;
-        lastError = error;
-        return float(kp * error + ki * integral + kd * derivative);
-    }
-
-};
 //---------------------------OBJETOS------------------------------------//
     //MOTORES
         motor Esquerdo(13,12,baseSpeed);
