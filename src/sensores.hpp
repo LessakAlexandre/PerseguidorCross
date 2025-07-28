@@ -51,6 +51,7 @@ class sensor_lateral{
     public:
         sensor_lateral(int sensor_pin);
         int count_lap();
+        int getPin();
     };   
 
 #endif

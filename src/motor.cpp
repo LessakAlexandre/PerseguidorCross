@@ -18,6 +18,9 @@ void motor::setMotorSpeed(int speed){
     speed = constrain(speed, 0, 1023);
     ledcWrite(this->PWM_PIN, speed);
 }
-int motor::getPin(){;
+int motor::getPin(){
     return PWM_PIN;
+}
+int motor::getDir(){
+    return DIR_PIN;
 }

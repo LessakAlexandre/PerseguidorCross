@@ -1,4 +1,7 @@
 #include "sensores.hpp"
+#include "defines.h"
+#include "BT.h"
+#include "BT.cpp"
 //-----------Frontal----------//
 sensor::sensor(float PosicaoInicial){
     lastPosicao = PosicaoInicial;
@@ -36,8 +39,16 @@ sensor_lateral::sensor_lateral(int sensor_pin){
     SENSOR_PIN = sensor_pin;
 }
 int sensor_lateral::count_lap(){
-    if(digitalRead(SENSOR_PIN)==HIGH){
-        count++;
+    if(!robotEnabled) return;
+    if(millis() - last_lap_time < 200/*Deboucing time*/) return;
+    last_lap_time = millis();
+    end_lap_counter += 1;
+    if(end_lap_counter >= endLap_goal){
+        bluetooth_states_t state = STOP_STATE;
+        Serial.println("Stoping!");
+    robotEnabled = false;       
     }
-    return count;
+}
+int sensor_lateral::getPin(){
+    return SENSOR_PIN;
 }

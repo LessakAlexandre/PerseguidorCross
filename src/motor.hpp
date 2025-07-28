@@ -22,5 +22,6 @@ class motor{
         //pinMode(FAULT_PIN, INPUT_PULLUP); -> INPUT_PULLUP valor HIGH por padrão
         void setMotorSpeed(int speed);
         int getPin();
+        int getDir();
 };
 #endif // motor_HPP
