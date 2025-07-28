@@ -13,6 +13,7 @@
         #define MUX_S2                9
         #define MUX_S3                3
         #define MUX_SIG               2
+        SemaphoreHandle_t xMutex;
 
 //---------Funções---------------//
 inline void setMuxChannel(int canal) {

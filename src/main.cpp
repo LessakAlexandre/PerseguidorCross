@@ -8,33 +8,14 @@
 #include <iostream>
 #include <vector>
 
+
+#include "gyro.hpp"
+#include "encoder.hpp"
 #include "pid.hpp"
 #include "sensores.hpp"
 #include "motor.hpp"
 
 //----------------DEFINIÇÕES----------------------------------//
-    //MUX
-        #define MUX_S0                42
-        #define MUX_S1                41
-        #define MUX_S2                9
-        #define MUX_S3                3
-        #define MUX_SIG               2
-    SemaphoreHandle_t xMutex;
-    //SENSORES
-    //GIROSCOPIO
-        volatile float g_angle1 =     0.0f;
-        volatile float g_angle2 =     0.0f;
-
-        volatile float g_lastAngle1 = 0.0f;
-        volatile float g_lastAngle2 = 0.0f;
-
-        volatile float g_totalDisp1 = 0.0f; // cm
-        volatile float g_totalDisp2 = 0.0f; // cm
-
-    // Giroscópio (Z) em graus/s (dps)
-        volatile float g_gyroZ_dps =  0.0f;
-        float gyroOffset =            0;
-
     // Pose do robô
         volatile float g_x     =      0.0f; // posição em X (cm)
         volatile float g_y     =      0.0f; // posição em Y (cm)
@@ -48,12 +29,6 @@
         #define NUMPIXELS             1
         Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
         Adafruit_NeoPixel pixels2(NUMPIXELS, NEOPIXEL2_PIN, NEO_GRB + NEO_KHZ800);
-    //I2C
-        #define I2C_SDA               5
-        #define I2C_SCL               4
-        #define LSM6DSR_ADDRESS LSM6DSR_I2C_ADD_L
-        TwoWire I2C_BUS = TwoWire(0);
-        LSM6DSRSensor AccGyr(&I2C_BUS, LSM6DSR_ADDRESS);
     //GLOBAIS
         volatile float posicao =      0.0;   // Posição calculada dos sensores
         volatile bool robotEnabled =  false; // Se falso, os motores são desligados
@@ -63,51 +38,6 @@
         const float WHEEL_DIAMETER  = 22.5f;           // Diâmetro da roda (mm)
         const float WHEEL_CIRCUMF_CM=(WHEEL_DIAMETER * 3.14159265359f) / 10.0f; // Circunferência em cm
         const float WHEEL_BASE      = 0.135f;           // Distância entre as rodas (m)
-//---------------------------CLASSES-----------------------------------//
-    class encoder{
-    private:
-        const int PIN;
-        const int SPI_BUS_SPEED = 10000000;
-        AS5047P ENCODER;
-        //AS5047P ENCONDER(PIN, SPI_BUS_SPEED);
-    public:
-        encoder(int PIN_ENCODER):PIN(PIN_ENCODER),ENCODER(PIN_ENCODER,SPI_BUS_SPEED){  
-        //confirmar se está certo o ENCODER
-        }
-        float leitura(){
-            return ENCODER.readAngleDegree();
-        }
-        bool SPI(){
-            return ENCODER.initSPI();
-        }
-    };
-    class giroscopio{
-    private:
-        int32_t gyroRaw[3];
-        const int numSamples = 1000;  
-        float sumGyro = 0;
-        float Offset;
-    public:
-        float calibrateSensor() {
-            int32_t gyroData[3];
-            Serial.println("Calibrando o sensor... Mantenha-o imóvel.");
-            delay(2000);
-            for (int i = 0; i < numSamples; i++) {
-                AccGyr.Get_G_Axes(gyroData);
-                sumGyro += gyroData[2];
-                delay(5);
-            }
-            Offset = sumGyro / numSamples;
-            
-            Serial.print("Giroscópio Offsets: ");
-            Serial.println(gyroOffset);
-            return Offset;
-        }
-        float leitura(){
-            AccGyr.Get_G_Axes(gyroRaw);
-            return gyroRaw[2];
-        }
-    };
 //---------------------------OBJETOS------------------------------------//
     //MOTORES
         motor Esquerdo(13,12,baseSpeed);
