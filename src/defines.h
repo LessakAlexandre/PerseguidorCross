@@ -23,7 +23,9 @@
     //GLOBAIS
         unsigned long last_lap_time;
         uint16_t end_lap_counter = 0;
-
+        bool last_lap_state = false;
+        #define BRAKE_TIME_MS 500;
+        unsigned long stop_time = 0;
 
 
 

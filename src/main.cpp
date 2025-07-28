@@ -264,7 +264,8 @@ void IRTask(void *pvParameters) {
       if (comando == IR_POWER_CODE) {
         robotEnabled = !robotEnabled;  // Alterna o estado
         if(!robotEnabled) {
-          baseSpeed = 0;
+          digitalWrite(Direito.getDir(), LOW);
+          digitalWrite(Esquerdo.getDir(), LOW);
         } else {
           baseSpeed = baseSpeedIncrement;
           Serial.println(baseSpeed);
@@ -341,19 +342,17 @@ void BtTask(void *pvParameters){
       break;
     case STAR_STATE:
         bool end_of_lap_state = digitalRead(Lateral.getPin());
-          if(last_end_of_lap_state && !end_of_lap_state) endOfLap();  
-          last_end_of_lap_state = end_of_lap_state;
-
-          if(stop && millis() - stop_time > BRAKE_TIME_MS){
-              stop = false;
-              bluetooth_states_t state = STOP_STATE;
+        if(last_lap_state && !end_of_lap_state) Lateral.count_lap();  
+        last_lap_state = end_of_lap_state;
+        if(!robotEnabled && millis()-stop_time>500 /*BRAKE_TIME_MS*/){
+          robotEnabled = true;
+          bluetooth_states_t state = STOP_STATE;
         }
-          }    
     default:
       break;
     }
+  }
 }
-  
 
 
 
@@ -454,11 +453,12 @@ void setup(){
       Serial.println("Erro ao criar Mutex!");
   }
   //Cria as Task
-  xTaskCreatePinnedToCore(taskReadSensors,  "TaskReadSensors",  4096, NULL,3, NULL, 1);
+  xTaskCreatePinnedToCore(taskReadSensors,  "TaskReadSensors",  4096, NULL,4, NULL, 1);
   xTaskCreatePinnedToCore(ControlTask,  "ControlTask",  4096, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(SensorTask,  "SensorTask",  4096, NULL, 2, NULL, 0);
-  xTaskCreatePinnedToCore(taskComputeOdom,  "TaskComputeOdom",  4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(taskRecordCoordinates, "TaskRecordCoordinates", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(IRTask, "IRTask", 2048, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(taskComputeOdom,  "TaskComputeOdom",  4096, NULL, 3, NULL, 1);
+  xTaskCreatePinnedToCore(taskRecordCoordinates, "TaskRecordCoordinates", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(IRTask, "IRTask", 2048, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(BtTask, "BtTask", 2048,NULL, 0, NULL, 1);
 }
 void loop(){}
