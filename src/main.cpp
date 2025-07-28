@@ -8,6 +8,9 @@
 #include <iostream>
 #include <vector>
 
+#include "sensores.hpp"
+#include "motor.hpp"
+
 //----------------DEFINIÇÕES----------------------------------//
     //MUX
         #define MUX_S0                42
@@ -16,17 +19,7 @@
         #define MUX_S3                3
         #define MUX_SIG               2
     SemaphoreHandle_t xMutex;
-    //MOTORES
-        #define PWM_PIN3              40      // pino para MCPWM (exemplo)
-        #define PWM_FREQ              37500   // Frequência PWM para os motores
-        #define PWM_RESOLUTION        10
-        const float posicaoDesejada = 550;
-        int baseSpeedIncrement =      300;     // Resolução: 10 bits (0-1023)
-        int baseSpeed =               140;
     //SENSORES
-        #define NUM_SENSORES          12
-        const int VALOR_ESCALA =      1000;
-        bool calibrado =              false;
     //GIROSCOPIO
         volatile float g_angle1 =     0.0f;
         volatile float g_angle2 =     0.0f;
@@ -69,107 +62,7 @@
         const float WHEEL_DIAMETER  = 22.5f;           // Diâmetro da roda (mm)
         const float WHEEL_CIRCUMF_CM=(WHEEL_DIAMETER * 3.14159265359f) / 10.0f; // Circunferência em cm
         const float WHEEL_BASE      = 0.135f;           // Distância entre as rodas (m)
-//--------------FUNÇÕES------------------
-    inline void setMuxChannel(int canal) {
-        digitalWrite(MUX_S0, (canal & 0x01) ? HIGH : LOW);
-        digitalWrite(MUX_S1, (canal & 0x02) ? HIGH : LOW);
-        digitalWrite(MUX_S2, (canal & 0x04) ? HIGH : LOW);
-        digitalWrite(MUX_S3, (canal & 0x08) ? HIGH : LOW);
-    }
-    int mapearValorSensorInvertido(int valor, int minVal, int maxVal) {
-        if (valor <= minVal) return VALOR_ESCALA;
-        if (valor >= maxVal) return 0;
-        return VALOR_ESCALA - ((valor - minVal) * VALOR_ESCALA / (maxVal - minVal));
-    }
-
 //---------------------------CLASSES-----------------------------------//
-    class MOTOR{
-    private:
-        const int PWM_PIN;
-        const int DIR_PIN;
-        int baseSpeed;
-
-    public:
-        //---------------------construtor-------------------------//
-        MOTOR(int PWM_pin,int DIR_pin,int BASE_SPEED):PWM_PIN(PWM_pin), DIR_PIN(DIR_pin){ 
-            pinMode(DIR_PIN, OUTPUT);
-            baseSpeed = BASE_SPEED;
-        
-        }
-        //----------------------Funções---------------------------//
-        //pinMode(FAULT_PIN, INPUT_PULLUP); -> INPUT_PULLUP valor HIGH por padrão
-        void setMotorSpeed(int speed){
-        // Se speed >= 0, direção para frente; caso contrário, ré.
-            if (speed >= 0) {
-                digitalWrite(this->DIR_PIN, LOW);
-            } else {
-                digitalWrite(this->DIR_PIN, HIGH);
-                speed = -speed;
-            }
-            speed = constrain(speed, 0, 1023);
-            ledcWrite(this->PWM_PIN, speed);
-        }
-        int getPin(){;
-            return PWM_PIN;
-        }
-    };
-    class sensor{
-    private:
-        float lastPosicao;
-        long somaPonderada = 0;
-        long somaValores = 0;
-        int sensorMin[NUM_SENSORES];
-        int sensorMax[NUM_SENSORES];
-        int sensorValues[NUM_SENSORES];
-        const int sensorPos[NUM_SENSORES] = {0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100};
-    public:
-
-        sensor(float PosicaoInicial){
-        lastPosicao = PosicaoInicial;
-        }
-        void calibracao(){
-            for (int i = 0; i < NUM_SENSORES; i++) {
-                sensorMin[i] = 65535;
-                sensorMax[i] = 0;
-            }
-            unsigned long tempoCalibracao = millis();
-            while (millis() - tempoCalibracao < 5000) {
-                for (int i = 0; i < NUM_SENSORES; i++) {
-                setMuxChannel(i);
-                int leitura = analogRead(MUX_SIG);
-                if (leitura < sensorMin[i]) sensorMin[i] = leitura;
-                if (leitura > sensorMax[i]) sensorMax[i] = leitura;
-                }
-            }
-        }
-        volatile float leitura(){
-            for (int i = 0; i < NUM_SENSORES; i++) {
-                setMuxChannel(i);
-                int leitura = analogRead(MUX_SIG);
-                int valorSensor = mapearValorSensorInvertido(leitura, sensorMin[i], sensorMax[i]);
-                sensorValues[i] = valorSensor;
-                somaPonderada += (long)valorSensor * sensorPos[i];
-                somaValores += valorSensor;
-            }
-            float pos = (somaValores > 0) ? ((float)somaPonderada / somaValores) : lastPosicao;
-            lastPosicao = pos;
-            return pos;
-        }
-    };
-    class sensor_lateral{
-    private:
-        const int SENSOR_PIN;
-        int count;
-
-    public:
-        sensor_lateral(int sensor_pin):SENSOR_PIN(sensor_pin){}
-        int count_lap(){
-            if(digitalRead(SENSOR_PIN)==HIGH){
-                count++;
-            }
-            return count++;
-        }
-    };
     class encoder{
     private:
         const int PIN;
@@ -241,24 +134,24 @@
 };
 //---------------------------OBJETOS------------------------------------//
     //MOTORES
-        MOTOR esquerdo(13,12,baseSpeed);
-        MOTOR direito(48,47,baseSpeed);
+        motor Esquerdo(13,12,baseSpeed);
+        motor Direito(48,47,baseSpeed);
     //SENSORES 
         sensor Frontais(550);
     //sensor Lateral(/*PINO*/);
     //ENCONDER
-        encoder ENCODER_11(1);
-        encoder ENCODER_39(8);
+        encoder Enconder_11(1);
+        encoder Encoder_39(8);
     //GIROSCOPIO
-        giroscopio GYRO; //Ta certo assim?
+        giroscopio Gyro; //Ta certo assim?
     //PID
-        pid PID(0.475 , 0.0 , 0.075 , 550);
+        pid Pid(0.475 , 0.0 , 0.075 , 550);
 //------------------------------TASKS-----------------------------------//
 void taskReadSensors(void *pvParameters){
   (void) pvParameters;
 
-  float initAngle1 = ENCODER_11.leitura();
-  float initAngle2 = ENCODER_39.leitura();
+  float initAngle1 = Enconder_11.leitura();
+  float initAngle2 = Encoder_39.leitura();
 
   xSemaphoreTake(xMutex, portMAX_DELAY);
   g_lastAngle1 = initAngle1;
@@ -270,8 +163,8 @@ void taskReadSensors(void *pvParameters){
 
   for (;;)
   {
-    float angle1 = ENCODER_11.leitura();
-    float angle2 = ENCODER_39.leitura();
+    float angle1 = Enconder_11.leitura();
+    float angle2 = Encoder_39.leitura();
 
     // Ler giroscópio bruto
     int32_t gyroRaw[3];
@@ -462,15 +355,15 @@ void ControlTask(void *pvParameters) {
         unsigned long now = millis();
         float dt = (now - lastTime) / 1000.0;
         if(dt>=0){
-            float correcao=PID.corretcion(posicao,dt);
+            float correcao=Pid.corretcion(posicao,dt);
             
             int leftSpeed  = baseSpeed - (int)correcao;
             int rightSpeed = -(baseSpeed + (int)correcao);
             
             leftSpeed  = constrain(leftSpeed, 10, 800);
             rightSpeed = constrain(rightSpeed, -800, -10);
-            direito.setMotorSpeed(rightSpeed);
-            esquerdo.setMotorSpeed(leftSpeed);
+            Direito.setMotorSpeed(rightSpeed);
+            Esquerdo.setMotorSpeed(leftSpeed);
 
         }
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -490,7 +383,7 @@ void setup(){
     AccGyr.Enable_X();
     AccGyr.Enable_G();
     //
-    gyroOffset = GYRO.calibrateSensor();
+    gyroOffset = Gyro.calibrateSensor();
     
     if (!SPIFFS.begin(true)) {
         Serial.println("Erro ao montar SPIFFS");
@@ -520,8 +413,8 @@ void setup(){
 
     // Configuração do receptor IR
 
-    ledcSetup(direito.getPin(), PWM_FREQ, PWM_RESOLUTION);
-    ledcSetup(esquerdo.getPin(), PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(Direito.getPin(), PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(Esquerdo.getPin(), PWM_FREQ, PWM_RESOLUTION);
     ledcSetup(PWM_PIN3, PWM_FREQ, PWM_RESOLUTION);
     pixels.setPixelColor(0, pixels.Color(51, 51, 204));
     pixels2.setPixelColor(0, pixels2.Color(51, 51, 204));
@@ -539,11 +432,11 @@ void setup(){
     pixels2.show();
 
     vTaskDelay(pdMS_TO_TICKS(2500));
-    while (!ENCODER_11.SPI()){
+    while (!Enconder_11.SPI()){
         Serial.println(F("Erro ao conectar com o Encoder 1!"));
         delay(2000);
     }
-    while (!ENCODER_39.SPI()){
+    while (!Encoder_39.SPI()){
         Serial.println(F("Erro ao conectar com o Encoder 1!"));
         delay(2000);
     }
