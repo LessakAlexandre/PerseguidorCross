@@ -32,3 +32,4 @@
 *.app
 # Ignorar arquivos do PlatformIO
 .pio/
+.vscode/
